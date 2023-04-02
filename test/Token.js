@@ -1,111 +1,139 @@
-// This is an example test file. Hardhat will run every *.js file in `test/`,
-// so feel free to add new ones.
-
-// Hardhat tests are normally written with Mocha and Chai.
-
-// We import Chai to use its asserting functions here.
 const { expect } = require("chai");
 
-// We use `loadFixture` to share common setups (or fixtures) between tests.
-// Using this simplifies your tests and makes them run faster, by taking
-// advantage or Hardhat Network's snapshot functionality.
-const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
-
-// `describe` is a Mocha function that allows you to organize your tests.
-// Having your tests organized makes debugging them easier. All Mocha
-// functions are available in the global scope.
-//
-// `describe` receives the name of a section of your test suite, and a
-// callback. The callback must define the tests of that section. This callback
-// can't be an async function.
-describe("Token contract", function () {
-  // We define a fixture to reuse the same setup in every test. We use
-  // loadFixture to run this setup once, snapshot that state, and reset Hardhat
-  // Network to that snapshot in every test.
-  async function deployTokenFixture() {
-    // Get the ContractFactory and Signers here.
-    const Token = await ethers.getContractFactory("Token");
-    const [owner, addr1, addr2] = await ethers.getSigners();
-
-    // To deploy our contract, we just have to call Token.deploy() and await
-    // for it to be deployed(), which happens onces its transaction has been
-    // mined.
-    const hardhatToken = await Token.deploy();
-
-    await hardhatToken.deployed();
-
-    // Fixtures can return anything you consider useful for your tests
-    return { Token, hardhatToken, owner, addr1, addr2 };
-  }
-
-  // You can nest describe calls to create subsections.
-  describe("Deployment", function () {
-    // `it` is another Mocha function. This is the one you use to define your
-    // tests. It receives the test name, and a callback function.
-//
-    // If the callback function is async, Mocha will `await` it.
-    it("Should set the right owner", async function () {
-      // We use loadFixture to setup our environment, and then assert that
-      // things went well
-      const { hardhatToken, owner } = await loadFixture(deployTokenFixture);
-
-      // Expect receives a value and wraps it in an assertion object. These
-      // objects have a lot of utility methods to assert values.
-
-      // This test expects the owner variable stored in the contract to be
-      // equal to our Signer's owner.
-      expect(await hardhatToken.owner()).to.equal(owner.address);
-    });
-
-    it("Should assign the total supply of tokens to the owner", async function () {
-      const { hardhatToken, owner } = await loadFixture(deployTokenFixture);
-      const ownerBalance = await hardhatToken.balanceOf(owner.address);
-      expect(await hardhatToken.totalSupply()).to.equal(ownerBalance);
-    });
+describe('Staking', () => {
+  beforeEach(async () => {
+    [owner, signer2] = await ethers.getSigners();
+    Staking = await ethers.getContractFactory('Staking', owner);
+    staking = await Staking.deploy(
+      187848,
+      {
+        value: ethers.utils.parseEther('100')
+      }
+    );
+    Chainlink = await ethers.getContractFactory('Chainlink', signer2);
+    chainlink = await Chainlink.deploy();
+    staking.connect(owner).addToken(
+      'Chainlink',
+      'LINK',
+      chainlink.address,
+      867,
+      1500
+    )
+    await chainlink.connect(signer2).approve(
+      staking.address,
+      ethers.utils.parseEther('100')
+    );
+    staking.connect(signer2).stakeTokens(
+      'LINK',
+      ethers.utils.parseEther('100')
+    )
   });
 
-  describe("Transactions", function () {
-    it("Should transfer tokens between accounts", async function () {
-      const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
-      // Transfer 50 tokens from owner to addr1
-      await expect(hardhatToken.transfer(addr1.address, 50))
-        .to.changeTokenBalances(hardhatToken, [owner, addr1], [-50, 50]);
+  describe('addToken', () => {
+    it('adds a token symbol', async () => {
+      const tokenSymbols = await staking.getTokenSymbols()
+      expect(tokenSymbols).to.eql(['LINK'])
+    })
 
-      // Transfer 50 tokens from addr1 to addr2
-      // We use .connect(signer) to send a transaction from another account
-      await expect(hardhatToken.connect(addr1).transfer(addr2.address, 50))
-        .to.changeTokenBalances(hardhatToken, [addr1, addr2], [-50, 50]);
-    });
+    it('adds token information', async () => {
+      const token = await staking.getToken('LINK')
+      
+      expect(token.tokenId).to.equal(1)
+      expect(token.name).to.equal('Chainlink')
+      expect(token.symbol).to.equal('LINK')
+      expect(token.tokenAddress).to.equal(chainlink.address)
+      expect(token.usdPrice).to.equal(867)
+      expect(token.ethPrice).to.equal(0)
+      expect(token.apy).to.equal(1500)
+    })
 
-    it("should emit Transfer events", async function () {
-      const { hardhatToken, owner, addr1, addr2 } = await loadFixture(deployTokenFixture);
+    it('increments currentTokenId', async () => {
+      expect( await staking.currentTokenId() ).to.equal(3)
+    })
+  })
 
-      // Transfer 50 tokens from owner to addr1
-      await expect(hardhatToken.transfer(addr1.address, 50))
-        .to.emit(hardhatToken, "Transfer").withArgs(owner.address, addr1.address, 50)
+  describe('stakeToken', () => {
+    it('transfers tokens', async () => {
+      const signerBalance = await chainlink.balanceOf(signer2.address)
+      expect(signerBalance).to.equal( ethers.utils.parseEther('4900') )
+      const contractBalance = await chainlink.balanceOf(staking.address)
+      expect(contractBalance).to.equal( ethers.utils.parseEther('100') )
+    })
 
-      // Transfer 50 tokens from addr1 to addr2
-      // We use .connect(signer) to send a transaction from another account
-      await expect(hardhatToken.connect(addr1).transfer(addr2.address, 50))
-        .to.emit(hardhatToken, "Transfer").withArgs(addr1.address, addr2.address, 50)
-    });
+    it('creates a position', async () => {
+      const positionIds = await staking.connect(signer2).getPositionIdsForAddress()
+      expect(positionIds.length).to.equal(1)
 
-    it("Should fail if sender doesn't have enough tokens", async function () {
-      const { hardhatToken, owner, addr1 } = await loadFixture(deployTokenFixture);
-      const initialOwnerBalance = await hardhatToken.balanceOf(
-        owner.address
-      );
+      const position = await staking.connect(signer2).getPositionIdsForId(positionIds[0])
 
-      // Try to send 1 token from addr1 (0 tokens) to owner (1000 tokens).
-      // `require` will evaluate false and revert the transaction.
-      await expect(
-        hardhatToken.connect(addr1).transfer(owner.address, 1)
-      ).to.be.revertedWith("Not enough tokens");
+      expect(position.positionId).to.equal(1)
+      expect(position.walletAddress).to.equal(signer2.address)
+      expect(position.name).to.equal('Chainlink')
+      expect(position.symbol).to.equal('LINK')
+      expect(position.apy).to.equal(1500)
+      expect(position.tokenQuantity).to.equal( ethers.utils.parseEther('100') )
+      expect(position.open).to.equal(true)
+    })
 
-      // Owner balance shouldn't have changed.
-      expect(await hardhatToken.balanceOf(owner.address)).to.equal(
-        initialOwnerBalance
-      );
-    });
-  });
-});
+    it('increments positionId', async () => {
+      expect(await staking.currentPositionId()).to.equal(1)
+    })
+    it('increases total amount of staked token', async () => {
+      expect(await staking.stakedTokens('LINK')).to.equal( ethers.utils.parseEther('100') )
+    })
+  })
+
+  describe('calculateInterest', () => {
+    it('returns interest accrued to a position', async () => {
+      const apy = 150
+      const value = ethers.utils.parseEther('100')
+      const days = 365
+      
+      const interestRate = await staking.calculateInterest(apy, value, days)
+      expect( String(interestRate) ).to.equal( String(ethers.utils.parseEther('15')) )
+    })
+  })
+
+  describe('calculateNumberDays', () => {
+    it('returns the number of days since createdDate', async () => {
+      const provider = waffle.provider;
+      const block = await provider.getBlock()
+      const oneYearAgo = block.timestamp - (86400 * 101)
+      const days = await staking.connect(owner).calculateInterestDays(oneYearAgo)
+
+      expect(days).to.be.equal(101)
+    })
+  })
+
+  describe('closePosition', () => {
+    beforeEach(async () => {
+      provider = waffle.provider;
+      contractEthbalanceBefore = await provider.getBalance(staking.address)
+      signerEthBalanceBefore = await provider.getBalance(signer2.address)
+
+      const block = await provider.getBlock()
+      const newCreatedDate = block.timestamp - (86400 * 365)
+      await staking.connect(owner).modifyCreatedDate(1, newCreatedDate)
+      await staking.connect(signer2).closePosition(1)
+    })
+    
+    it('returns tokens to wallet', async () => {
+      const signerBalance = await chainlink.balanceOf(signer2.address)
+      expect(signerBalance).to.equal( ethers.utils.parseEther('5000') )
+      const contractBalance = await chainlink.balanceOf(staking.address)
+      expect(contractBalance).to.equal( ethers.utils.parseEther('0') )
+    })
+
+    it('sends ether interest to wallet', async () => {
+      const contractEthBalanceAfter = await provider.getBalance(staking.address)
+      const signerEthBalanceAfter = await provider.getBalance(signer2.address)
+      expect(contractEthBalanceAfter).to.be.below(contractEthbalanceBefore)
+      expect(signerEthBalanceAfter).to.be.above(signerEthBalanceBefore)
+    })
+    
+    it('closes position', async () => {
+      const position = await staking.connect(signer2).getPositionIdsForId(1)
+      expect(position.open).to.equal(false)
+    })
+  })
+})

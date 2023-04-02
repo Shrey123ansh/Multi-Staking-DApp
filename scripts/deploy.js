@@ -1,57 +1,56 @@
-// This is a script for deploying your contracts. You can adapt it to deploy
-// yours, or create new ones.
-
-const path = require("path");
-
 async function main() {
-  // This is just a convenience check
-  if (network.name === "hardhat") {
-    console.warn(
-      "You are trying to deploy a contract to the Hardhat Network, which" +
-        "gets automatically created and destroyed every time. Use the Hardhat" +
-        " option '--network localhost'"
-    );
-  }
+  [owner] = await ethers.getSigners();
 
-  // ethers is available in the global scope
-  const [deployer] = await ethers.getSigners();
-  console.log(
-    "Deploying the contracts with the account:",
-    await deployer.getAddress()
+  const Staking = await ethers.getContractFactory('Staking', owner);
+
+  const staking = await Staking.deploy(
+    181819,
+    {
+      value: ethers.utils.parseEther('100')
+    }
   );
 
-  console.log("Account balance:", (await deployer.getBalance()).toString());
+  const Chainlink = await ethers.getContractFactory('Chainlink', owner);            chainlink = await Chainlink.deploy();
+  const Tether = await ethers.getContractFactory('Tether', owner);                  tether = await Tether.deploy();
+  const UsdCoin = await ethers.getContractFactory('UsdCoin', owner);                usdCoin = await UsdCoin.deploy();
+  const WrappedBitcoin = await ethers.getContractFactory('WrappedBitcoin', owner);  wrappedBitcoin = await WrappedBitcoin.deploy();
+  const WrappedEther = await ethers.getContractFactory('WrappedEther', owner);      wrappedEther = await WrappedEther.deploy();
 
-  const Token = await ethers.getContractFactory("Token");
-  const token = await Token.deploy();
-  await token.deployed();
+  await staking.connect(owner).addToken('Chainlink',     'LINK', chainlink.address, 867, 1500);
+  await staking.connect(owner).addToken('Tether',        'USDT', tether.address, 100, 200);
+  await staking.connect(owner).addToken('UsdCoin',       'USDC', usdCoin.address, 100, 200, );
+  await staking.connect(owner).addToken('WrappedBitcoin','WBTC', wrappedBitcoin.address, 2382096, 500);
+  await staking.connect(owner).addToken('WrappedEther',  'WETH', wrappedEther.address, 187848, 1000);
 
-  console.log("Token address:", token.address);
+  console.log("Staking:",        staking.address);
+  console.log("Chainlink:",      chainlink.address);
+  console.log("Tether:",         tether.address);
+  console.log("UsdCoin:",        usdCoin.address);
+  console.log("WrappedBitcoin:", wrappedBitcoin.address);
+  console.log("WrappedEther:",   wrappedEther.address);
 
-  // We also save the contract's artifacts and address in the frontend directory
-  saveFrontendFiles(token);
+  await chainlink.connect(owner).approve(staking.address, ethers.utils.parseEther('100'));
+  await staking.connect(owner).stakeTokens('LINK',ethers.utils.parseEther('10'))
+
+  await wrappedBitcoin.connect(owner).approve(staking.address, ethers.utils.parseEther('2'));
+  await staking.connect(owner).stakeTokens('WBTC',ethers.utils.parseEther('2'))
+
+  await wrappedBitcoin.connect(owner).approve(staking.address, ethers.utils.parseEther('10'));
+  await staking.connect(owner).stakeTokens('WBTC',ethers.utils.parseEther('8'))
+
+  await wrappedEther.connect(owner).approve(staking.address, ethers.utils.parseEther('10'));
+  await staking.connect(owner).stakeTokens('WETH',ethers.utils.parseEther('8'))
+
+
+  const provider = waffle.provider;
+  const block = await provider.getBlock()
+  const newCreatedDate = block.timestamp - (86400 * 365)
+  await staking.connect(owner).modifyCreatedDate(1, newCreatedDate)
+  await staking.connect(owner).modifyCreatedDate(2, newCreatedDate)
+  await staking.connect(owner).modifyCreatedDate(3, newCreatedDate)
 }
 
-function saveFrontendFiles(token) {
-  const fs = require("fs");
-  const contractsDir = path.join(__dirname, "..", "frontend", "src", "contracts");
-
-  if (!fs.existsSync(contractsDir)) {
-    fs.mkdirSync(contractsDir);
-  }
-
-  fs.writeFileSync(
-    path.join(contractsDir, "contract-address.json"),
-    JSON.stringify({ Token: token.address }, undefined, 2)
-  );
-
-  const TokenArtifact = artifacts.readArtifactSync("Token");
-
-  fs.writeFileSync(
-    path.join(contractsDir, "Token.json"),
-    JSON.stringify(TokenArtifact, null, 2)
-  );
-}
+// npx hardhat run --network localhost scripts/deploy.js
 
 main()
   .then(() => process.exit(0))
